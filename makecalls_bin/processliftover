@@ -1,0 +1,135 @@
+#!/usr/bin/python 
+
+################################################################################
+### COPYRIGHT ##################################################################
+
+# Copyright (c) 2020, New York Genome Center
+# All rights reserved.
+# 
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#     * Redistributions of source code must retain the above copyright
+#       notice, this list of conditions and the following disclaimer.
+#     * Redistributions in binary form must reproduce the above copyright
+#       notice, this list of conditions and the following disclaimer in the
+#       documentation and/or other materials provided with the distribution.
+#     * Neither the name of the <organization> nor the
+#       names of its contributors may be used to endorse or promote products
+#       derived from this software without specific prior written permission.
+# 
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+# ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+# WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL <COPYRIGHT HOLDER> BE LIABLE FOR ANY
+# DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+# (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+# ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+# SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+################################################################# /COPYRIGHT ###
+################################################################################
+
+
+
+################################################################################
+### MODULES ####################################################################
+
+import sys
+from optparse import OptionParser
+import re
+
+################################################################### /MODULES ###
+################################################################################
+
+
+
+################################################################################
+### FUNCTIONS ##################################################################
+
+def readbed(filepath):
+	if filepath == 'stdin':
+		bedseq = sys.stdin
+	else:
+		bedseq = open(filepath, 'r')
+	for line in bedseq:
+		chromosome, start, end, name, score, strand = line.rstrip().split('\t')[:6]
+		yield chromosome, int(start), int(end), name, int(score), strand			
+		
+################################################################# /FUNCTIONS ###
+################################################################################
+
+
+
+################################################################################
+### ARGUMENTS,OPTIONS ##########################################################
+
+parser = OptionParser(usage = "\n%prog [options]", version="%prog 0.1")
+
+parser.add_option(
+	"-s",
+	metavar = "FILE",
+	type = "string",
+	dest = "scaffold_file",
+	default = 'stdin',
+	help = "Input scaffold BED filename (default = 'stdin')"
+	)
+
+parser.add_option(
+	"-l",
+	metavar = "FILE",
+	type = "string",
+	dest = "liftover_file",
+	default = 'stdin',
+	help = "Input liftOver BED filename (default = 'stdin')"
+	)
+
+
+(opt, args) = parser.parse_args()
+
+######################################################### /ARGUMENTS,OPTIONS ###
+################################################################################
+
+
+
+################################################################################
+### CONSTANTS ##################################################################
+
+################################################################# /CONSTANTS ###
+################################################################################
+
+
+
+################################################################################
+### MAIN #######################################################################
+			
+if __name__ == "__main__":
+
+	scaffold_bed = readbed(opt.scaffold_file)
+	liftover_bed = readbed(opt.liftover_file)
+
+	sdict = {}
+	slist = []
+	for chromosome, start, end, name, score, strand in scaffold_bed:
+		sdict[name] = [chromosome, start, end, name, score, strand]
+		slist.append(name)
+
+	ldict = {}
+	for chromosome, start, end, name, score, strand in liftover_bed:
+		score = (sdict[name][2] - sdict[name][1]) - (end - start)
+		if name not in ldict:
+			ldict[name] = []
+		if [chromosome, start, end, name, score, strand] not in ldict[name]:
+			ldict[name].append([chromosome, start, end, name, score, strand])
+
+	for name in slist:
+		schromosome, sstart, send, name, sscore, sstrand = sdict[name]
+		if name not in ldict:
+			print '\t'.join(str(v) for v in [schromosome, sstart, send, '.', '.', '.', name, '.:0', sstrand, '.'])
+		else:
+			for lchromosome, lstart, lend, name, lscore, lstrand in ldict[name]:
+					print '\t'.join(str(v) for v in [schromosome, sstart, send, lchromosome, lstart, lend, name, str(lscore) + ':' + str(len(ldict[name])), sstrand, lstrand])
+	
+###################################################################### /MAIN ###
+################################################################################

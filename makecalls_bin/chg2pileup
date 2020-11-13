@@ -1,0 +1,203 @@
+#!/usr/bin/env python 
+
+################################################################################
+### COPYRIGHT ##################################################################
+
+# Copyright (c) 2020, New York Genome Center
+# All rights reserved.
+# 
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#     * Redistributions of source code must retain the above copyright
+#       notice, this list of conditions and the following disclaimer.
+#     * Redistributions in binary form must reproduce the above copyright
+#       notice, this list of conditions and the following disclaimer in the
+#       documentation and/or other materials provided with the distribution.
+#     * Neither the name of the <organization> nor the
+#       names of its contributors may be used to endorse or promote products
+#       derived from this software without specific prior written permission.
+# 
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+# ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+# WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL <COPYRIGHT HOLDER> BE LIABLE FOR ANY
+# DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+# (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+# ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+# SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+################################################################# /COPYRIGHT ###
+################################################################################
+
+
+
+################################################################################
+### MODULES ####################################################################
+
+from optparse import OptionParser
+from sys import stdin, stdout, stderr
+from re import findall
+from bisect import bisect
+import numpy
+from operator import itemgetter
+
+################################################################### /MODULES ###
+################################################################################
+
+
+
+################################################################################
+### FUNCTIONS ##################################################################
+
+def readfasta(filepath):
+	name = None
+	if filepath == 'stdin':
+		fasta = stdin
+	else:
+		fasta = open(filepath, 'r')
+	for line in fasta:
+		if line[0] == '>':
+			if name:
+				yield(name,description,''.join(sequence))
+			header = line.rstrip()[1:].split()
+			name = header[0]
+			description = ' '.join(header[1:])
+			sequence = []
+		else:
+			sequence.append(line.rstrip().upper())
+	if filepath != 'stdin':
+		fasta.close()
+	if name:
+		yield(name,description,''.join(sequence))
+
+def readchanges(filepath):
+	name = None
+	if filepath == 'stdin':
+		changes = stdin
+	else:
+		changes = open(filepath, 'r')
+	for line in changes:
+		larray = line.strip().split('\t')
+		if len(larray) == 5:
+			chromosome, start, length, cpositions, changes = larray
+			yield chromosome, int(start), int(start) + int(length), [int(v) for v in cpositions.split(':')], changes.split(':')
+		else:
+			chromosome, start, length = larray
+			yield chromosome, int(start), int(start) + int(length), [], [] 
+	if filepath != 'stdin':
+		changes.close()
+
+		
+def print_pileup(pchromosome, pstart, pend, pchanges, pcoverages, fasta):
+	for position in xrange(pstart, pend):
+		reference = fasta[pchromosome][position]
+		#coverage = coverages[pchromosome][position]
+		coverage = pcoverages[position-pstart]
+		if position not in pchanges:
+			print '\t'.join(str(v) for v in [pchromosome, position, reference, coverage, reference])		
+		else:
+			pileup = [reference] * (coverage - len(pchanges[position])) + pchanges[position]
+			pileup_uniq = sorted([(pileup.count(v), v) for v in set(pileup)], key=itemgetter(0), reverse=True)
+			frequencies = ':'.join([str(v[0]) for v in pileup_uniq])
+			changes = ':'.join([str(v[1]) for v in pileup_uniq])
+			print '\t'.join(str(v) for v in [pchromosome, position, reference, frequencies, changes])
+
+################################################################# /FUNCTIONS ###
+################################################################################
+
+
+
+################################################################################
+### ARGUMENTS,OPTIONS ##########################################################
+
+parser = OptionParser(usage="\n%prog [options]", version="%prog 0.1")
+
+parser.add_option(
+	"-i",
+	metavar = "FILE",
+	type = "string",
+	dest = "chg_file",
+	default = 'stdin',
+	help = "Input .chg file [STDIN]"
+	)
+
+parser.add_option(
+	"-f",
+	metavar = "FILE",
+	type = "string",
+	dest = "fasta_file",
+	default = 'stdin',
+	help = "Input FASTA filename [STDIN]"
+	)
+
+(opt, args) = parser.parse_args()
+        
+######################################################### /ARGUMENTS,OPTIONS ###
+################################################################################
+
+
+
+################################################################################
+### CONSTANTS ##################################################################
+
+################################################################# /CONSTANTS ###
+################################################################################
+
+
+
+################################################################################
+### MAIN #######################################################################
+
+if __name__ == "__main__":
+
+	# read fasta and make coverage arrays
+	fasta_file = readfasta(opt.fasta_file)
+	fasta = {}
+	#coverages = {}
+	for name, description, sequence in fasta_file:
+		fasta[name] = sequence
+		#coverages[name] = numpy.zeros(len(sequence), dtype=numpy.uint32)
+		
+	# read changes file
+	changes_file = readchanges(opt.chg_file)
+
+	pchromosome = None
+	pstart = None
+	pend = None
+	pchanges = {}
+	pcoverages = []
+	for chromosome, start, end, positions, changes in changes_file:
+		#coverages[chromosome][start:end] += 1
+		if chromosome != pchromosome or start >= pend:
+			if pchromosome:
+				print_pileup(pchromosome, pstart, pend, pchanges, pcoverages, fasta)
+			pchromosome = chromosome
+			pstart = start
+			pend = end
+			pchanges = {}
+			pcoverages = [1] * (end - start)
+			for i in xrange(len(changes)):
+				pchanges[positions[i]] = [changes[i]]
+		else:
+			if end > pend:
+				pcoverages += [0] * (end - pend)
+				pend = end
+			for i in xrange(start-pstart,end-pstart):
+				pcoverages[i] += 1 
+			for i in xrange(len(changes)):
+				if positions[i] not in pchanges:
+					pchanges[positions[i]] = [changes[i]]
+				else:
+					pchanges[positions[i]].append(changes[i])
+
+	if pchromosome:
+		print_pileup(pchromosome, pstart, pend, pchanges, pcoverages, fasta)
+	
+
+
+		
+	
+###################################################################### /MAIN ###
+################################################################################

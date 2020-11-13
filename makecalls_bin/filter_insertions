@@ -1,0 +1,139 @@
+#!/usr/bin/python 
+
+################################################################################
+### COPYRIGHT ##################################################################
+
+# Copyright (c) 2020, New York Genome Center
+# All rights reserved.
+# 
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#     * Redistributions of source code must retain the above copyright
+#       notice, this list of conditions and the following disclaimer.
+#     * Redistributions in binary form must reproduce the above copyright
+#       notice, this list of conditions and the following disclaimer in the
+#       documentation and/or other materials provided with the distribution.
+#     * Neither the name of the <organization> nor the
+#       names of its contributors may be used to endorse or promote products
+#       derived from this software without specific prior written permission.
+# 
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+# ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+# WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL <COPYRIGHT HOLDER> BE LIABLE FOR ANY
+# DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+# (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+# ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+# SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+################################################################# /COPYRIGHT ###
+################################################################################
+
+
+
+################################################################################
+### MODULES ####################################################################
+
+import sys, re
+from optparse import OptionParser
+
+################################################################### /MODULES ###
+################################################################################
+
+
+
+
+################################################################################
+### FUNCTIONS ##################################################################
+
+def readbedpeseq(filepath):
+	if filepath == 'stdin':
+		bedseq = sys.stdin
+	else:
+		bedseq = open(filepath, 'r')
+	for line in bedseq:
+		chromosome0, start0, end0, chromosome1, start1, end1, name, score, strand0, strand1, target, query = line.rstrip().split('\t')[:12]
+		yield chromosome0, int(start0), int(end0), chromosome1, int(start1), int(end1), name, score, strand0, strand1, target, query			
+
+
+def filter(bedpeseq, mindelta, mintermini):
+	for chromosome0, start0, end0, chromosome1, start1, end1, name, score, strand0, strand1, target, query in bedpeseq:
+		scoresplit = [[int(v) for v in s.split(':')] for s in score.split('|')]
+		delta = end1 -start1 - end0 + start0
+		solid_termini = scoresplit[2][-2] >= mintermini and scoresplit[2][-1] >= mintermini
+		solid_perc = (float(scoresplit[2][1])/scoresplit[1][-1])*100
+		if delta >= mindelta and solid_termini:
+			yield chromosome0, start0, end0, chromosome1, start1, end1, name, score, strand0, strand1, target, query
+	
+################################################################# /FUNCTIONS ###
+################################################################################
+
+
+
+
+################################################################################
+### ARGUMENTS,OPTIONS ##########################################################
+
+parser = OptionParser(usage = "\n%prog [options]", version="%prog 0.1")
+
+parser.add_option(
+	"-b",
+	metavar = "FILE",
+	type = "string",
+	dest = "bedpeseq",
+	default = 'stdin',
+	help = "Input BEDPESEQ filename [STDIN]"
+	)
+
+parser.add_option(
+	"-d",
+	metavar = "INT",
+	type = "int",
+	dest = "mindelta",
+	default = 50,
+	help = "Minumum delta ALT-REF bp [50]"
+	)
+
+parser.add_option(
+	"-t",
+	metavar = "INT",
+	type = "int",
+	dest = "mintermini",
+	default = 50,
+	help = "Minumum non-gap termini length bp [50]"
+	)
+
+
+(opt, args) = parser.parse_args()
+
+######################################################### /ARGUMENTS,OPTIONS ###
+################################################################################
+
+
+
+
+################################################################################
+### CONSTANTS ##################################################################
+
+################################################################# /CONSTANTS ###
+################################################################################
+
+
+
+
+################################################################################
+### MAIN #######################################################################
+		
+if __name__ == "__main__":
+	bedpeseq = readbedpeseq(opt.bedpeseq)
+	filtered = filter(bedpeseq, mindelta=opt.mindelta, mintermini=opt.mintermini)
+	for chromosome0, start0, end0, chromosome1, start1, end1, name, score, strand0, strand1, target, query in filtered:
+		print '\t'.join(str(v) for v in [chromosome0, start0, end0, chromosome1, start1, end1, name, score, strand0, strand1, target, query])
+		
+
+
+	
+###################################################################### /MAIN ###
+################################################################################

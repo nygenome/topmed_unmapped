@@ -1,0 +1,185 @@
+#!/usr/bin/env python 
+
+################################################################################
+### COPYRIGHT ##################################################################
+
+# Copyright (c) 2020, New York Genome Center
+# All rights reserved.
+# 
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#     * Redistributions of source code must retain the above copyright
+#       notice, this list of conditions and the following disclaimer.
+#     * Redistributions in binary form must reproduce the above copyright
+#       notice, this list of conditions and the following disclaimer in the
+#       documentation and/or other materials provided with the distribution.
+#     * Neither the name of the <organization> nor the
+#       names of its contributors may be used to endorse or promote products
+#       derived from this software without specific prior written permission.
+# 
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+# ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+# WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL <COPYRIGHT HOLDER> BE LIABLE FOR ANY
+# DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+# (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+# ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+# SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+################################################################# /COPYRIGHT ###
+################################################################################
+
+
+
+################################################################################
+### MODULES ####################################################################
+
+from optparse import OptionParser
+from sys import stdin, stdout, stderr
+import random
+
+################################################################### /MODULES ###
+################################################################################
+
+
+
+################################################################################
+### FUNCTIONS ##################################################################
+
+def readpileup(filepath):
+	if filepath == 'stdin':
+		pileup = stdin
+	else:
+		pileup = open(filepath, 'r')
+	for line in pileup:
+		chromosome, position, reference, counts, alternatives = line.rstrip().split('\t')
+		yield chromosome, int(position), reference, [int(v) for v in counts.split(':')], alternatives.split(':')
+	if filepath != 'stdin':
+		pileup.close()
+
+def wrap(sid, seq, dev, cpl=60):
+	dev.write('>' + sid + '\n')
+	for x in range(0, len(seq), cpl):
+		dev.write(seq[x:x+cpl] + '\n')
+
+################################################################# /FUNCTIONS ###
+################################################################################
+
+
+
+################################################################################
+### ARGUMENTS,OPTIONS ##########################################################
+
+parser = OptionParser(usage="\n%prog [options]", version="%prog 0.1")
+
+parser.add_option(
+	"-i",
+	metavar = "FILE",
+	type = "string",
+	dest = "pileup_file",
+	default = 'stdin',
+	help = "Input .chg file [STDIN]"
+	)
+
+parser.add_option(
+	"-e",
+	metavar = "INT",
+	type = "int",
+	dest = "min_evidence",
+	default = 5,
+	help = "Minimum read evidence [5]"
+	)
+
+parser.add_option(
+	"-g",
+	metavar = "INT",
+	type = "int",
+	dest = "max_gap",
+	default = 100,
+	help = "Maximum gap size [100]"
+	)
+
+parser.add_option(
+	"-p",
+	metavar = "STR",
+	type = "string",
+	dest = "prefix",
+	default = 'scaffold',
+	help = "FASTA header prefix [scaffold]"
+	)
+
+(opt, args) = parser.parse_args()
+        
+######################################################### /ARGUMENTS,OPTIONS ###
+################################################################################
+
+
+
+################################################################################
+### CONSTANTS ##################################################################
+
+################################################################# /CONSTANTS ###
+################################################################################
+
+
+
+################################################################################
+### MAIN #######################################################################
+
+if __name__ == "__main__":
+
+	prefix = opt.prefix + '_'
+	pileup = readpileup(opt.pileup_file)
+
+	scaffold = 0
+	chromosome0 = None
+	sequence = ''
+	start = None
+	end = None
+	for chromosome, position, reference, counts, alternatives in pileup:
+		if chromosome != chromosome0:
+			if sequence:
+				name = prefix + str(scaffold)
+				wrap(name, sequence, stderr)
+				stdout.write('\t'.join(str(v) for v in [chromosome0, start, end, name, 0, '+']) + '\n')
+				scaffold += 1
+			chromosome0 = chromosome
+			sequence = ''
+			start = None
+			end = None
+
+		if counts[0] >= opt.min_evidence:
+			if len(counts) == 1:
+				base = alternatives[0]
+			else:
+				altcounts = zip(alternatives, counts)
+				base = random.choice([ac[0] for ac in altcounts if ac[1] == altcounts[0][1]])
+
+			if not sequence:
+				sequence = base
+				start = position
+				end = position + 1
+			elif sequence:
+				if position - end <= opt.max_gap:
+					sequence += (position-end)*'N' + base.replace('D', '')
+					end = position + 1 
+				else:
+					name = prefix + str(scaffold)
+					wrap(name, sequence, stderr)
+					stdout.write('\t'.join(str(v) for v in [chromosome0, start, end, name, 0, '+']) + '\n')
+					scaffold += 1
+					sequence = base
+					start = position
+					end = position + 1
+	if sequence:
+		name = prefix + str(scaffold)
+		wrap(name, sequence, stderr)
+		stdout.write('\t'.join(str(v) for v in [chromosome0, start, end, name, 0, '+']) + '\n')
+		
+	if opt.pileup_file != 'stdin':
+		pf.close()
+	
+###################################################################### /MAIN ###
+################################################################################

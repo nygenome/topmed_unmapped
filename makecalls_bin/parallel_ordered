@@ -1,0 +1,210 @@
+#!/usr/bin/python
+
+################################################################################
+### COPYRIGHT ##################################################################
+
+# Copyright (c) 2020, New York Genome Center
+# All rights reserved.
+# 
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#     * Redistributions of source code must retain the above copyright
+#       notice, this list of conditions and the following disclaimer.
+#     * Redistributions in binary form must reproduce the above copyright
+#       notice, this list of conditions and the following disclaimer in the
+#       documentation and/or other materials provided with the distribution.
+#     * Neither the name of the <organization> nor the
+#       names of its contributors may be used to endorse or promote products
+#       derived from this software without specific prior written permission.
+# 
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+# ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+# WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL <COPYRIGHT HOLDER> BE LIABLE FOR ANY
+# DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+# (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+# ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+# SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+################################################################# /COPYRIGHT ###
+################################################################################
+
+
+
+############################################################
+### MODULES ################################################
+
+from sys import stdin, stdout, stderr
+from time import sleep
+from optparse import OptionParser
+from Queue import Queue, Empty
+from subprocess import Popen, PIPE, STDOUT
+from threading import Thread
+from itertools import islice
+
+############################################### /MODULES ###
+############################################################
+
+
+
+############################################################
+### FUNCTIONS ##############################################
+
+def in2iqs(iqs, io, f, chk):
+	iqsl = len(iqs)
+	c = 0
+	while True:
+		l_chk = [line for line in islice(stdin,chk)]
+		if not l_chk:
+			f[0] = True
+			break
+		else:
+			iqs[c%iqsl].put(l_chk)
+			io[0] += 1
+			c += 1 
+
+def iq2p(ps, c, iqs, f, io, pi):
+	while sum(pi) < io[0] or not f[0]:
+		try:
+			ps[c].stdin.write(''.join(iqs[c].get_nowait()))
+			pi[c] += 1
+		except Empty:
+			sleep(0.001)
+			continue
+	ps[c].stdin.close()
+	
+def p2oq(ps, c, oqs, chk):
+	while True:
+		l_chk = [line for line in islice(ps[c].stdout,chk)]
+		if not l_chk:
+			ps[c].terminate()
+			break
+		oqs[c].put(''.join(l_chk))
+	
+def oqs2out(oqs, io, f, ps):
+	oqsl = len(oqs)
+	c = 0
+	while io[0] > io[1] or not f[0]:
+		stdout.write(oqs[c%oqsl].get())
+		io[1] += 1
+		c += 1
+		
+############################################# /FUNCTIONS ###
+############################################################
+
+
+
+############################################################
+### ARGUMENTS,OPTIONS ######################################
+
+parser = OptionParser(usage = "\n%prog -c [command] -p [n_cpus]", version = "%prog 0.1")
+
+parser.add_option(
+	"-c",
+	metavar = "STRING",
+	type = "string",
+	dest = "command",
+	default = 'cat',
+	help = "command to parallelize. Use $PID for process specific naming (default = 'cat')"
+	)
+
+parser.add_option(
+	"-p",
+	metavar = "INT",
+	type = "int",
+	dest = "cpus",
+	default = 1,
+	help = "CPUs (default = 1)"
+	)
+
+parser.add_option(
+	"-i",
+	metavar = "INT",
+	type = "int",
+	dest = "iu_lines",
+	default = 1,
+	help = "Input unit size (number of lines, default = 1)"
+	)
+
+parser.add_option(
+	"-o",
+	metavar = "INT",
+	type = "int",
+	dest = "ou_lines",
+	default = 1,
+	help = "Output unit size (number of lines, default = 1)"
+	)
+
+parser.add_option(
+	"-n",
+	metavar = "INT",
+	type = "int",
+	dest = "n_items",
+	default = 512,
+	help = "Chunk size (number of units, default = 512)"
+	)
+
+(opt, args) = parser.parse_args()
+     
+##################################### /ARGUMENTS,OPTIONS ###
+############################################################
+
+
+
+############################################################
+### CONSTANTS ##############################################
+
+############################################# /CONSTANTS ###
+############################################################
+
+
+
+############################################################
+### MAIN ###################################################
+
+if __name__ == '__main__':
+	io = [0,0]   # in and out counter
+	f = [False]	 # stdin closed
+	
+	iu = opt.iu_lines
+	ou = opt.ou_lines
+	nu = opt.n_items
+
+	i_chk = iu*nu
+	o_chk = ou*nu
+
+	q_s = 1024   # queue size (chuncks)	
+	iqs = []
+	oqs = []
+	
+	ps = []
+	ins = []
+	outs = []
+	pi = []
+
+	for c in xrange(opt.cpus):
+		iqs.append(Queue(maxsize = q_s))
+		oqs.append(Queue(maxsize = q_s))
+
+		pi.append(0)
+
+		ps.append(Popen([opt.command.replace('$PID',str(c)), ''], stdout=PIPE, stdin=PIPE, shell=True))	# process
+
+		ins.append(Thread(target = iq2p, args = (ps, c, iqs, f, io, pi)))		# in thread
+		ins[c].daemon = True
+		ins[c].start()
+	
+		outs.append(Thread(target = p2oq, args = (ps, c, oqs, o_chk)))     # out thread
+		outs[c].daemon = True
+		outs[c].start()
+
+	r = Thread(target = in2iqs, args = (iqs, io, f, i_chk))
+	r.deamon = True
+	r.start()
+
+	oqs2out(oqs, io, f, ps)
+
+################################################## /MAIN ###
+############################################################

@@ -1,0 +1,169 @@
+#!/usr/bin/env python 
+
+################################################################################
+### COPYRIGHT ##################################################################
+
+# Copyright (c) 2020, New York Genome Center
+# All rights reserved.
+# 
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#     * Redistributions of source code must retain the above copyright
+#       notice, this list of conditions and the following disclaimer.
+#     * Redistributions in binary form must reproduce the above copyright
+#       notice, this list of conditions and the following disclaimer in the
+#       documentation and/or other materials provided with the distribution.
+#     * Neither the name of the <organization> nor the
+#       names of its contributors may be used to endorse or promote products
+#       derived from this software without specific prior written permission.
+# 
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+# ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+# WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL <COPYRIGHT HOLDER> BE LIABLE FOR ANY
+# DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+# (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+# ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+# SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+################################################################# /COPYRIGHT ###
+################################################################################
+
+
+
+################################################################################
+### MODULES ####################################################################
+
+from optparse import OptionParser
+from sys import stdin, stdout, stderr
+from re import findall
+from bisect import bisect
+
+################################################################### /MODULES ###
+################################################################################
+
+
+
+################################################################################
+### FUNCTIONS ##################################################################
+
+################################################################# /FUNCTIONS ###
+################################################################################
+
+
+
+################################################################################
+### ARGUMENTS,OPTIONS ##########################################################
+
+parser = OptionParser(usage="\n%prog [options]", version="%prog 0.1")
+
+parser.add_option(
+	"-i",
+	metavar = "FILE",
+	type = "string",
+	dest = "sam_file",
+	default = 'stdin',
+	help = "Input SAM file (default = 'stdin')"
+	)
+
+(opt, args) = parser.parse_args()
+        
+######################################################### /ARGUMENTS,OPTIONS ###
+################################################################################
+
+
+
+################################################################################
+### CONSTANTS ##################################################################
+
+cigar_re = r'(\d+)([MIDS=]{1})'
+mmstr_re = r'[0-9]+|[A-Z]|\^[A-Z]+'
+bases = 'ACGTN'
+
+################################################################# /CONSTANTS ###
+################################################################################
+
+
+
+################################################################################
+### MAIN #######################################################################
+
+if __name__ == "__main__":
+	if opt.sam_file != 'stdin':
+		pf = open(opt.sam_file, 'r')
+	else:
+		pf = stdin
+   	for l in pf:
+		la= l.strip().split('\t')
+		sid = la[2]
+		pos = int(la[3])-1
+		cigar = la[5]
+		seq = la[9]
+		for tag in la[11:]:
+			if tag[:2] == 'MD':
+				mmstr = tag.split(':')[2]
+				break
+			else:
+				continue
+		parsed_cigar = findall(cigar_re, cigar)
+		parsed_mmstr = findall(mmstr_re, mmstr)
+				
+		ref_pos = pos
+		read_pos = 0
+		r_offs = [0]
+		m_lens = [0]
+		change_pos = []
+		change_seq = []
+		
+		if parsed_cigar[0][1] != 'I': # added 
+			for item in parsed_cigar:
+				c_type = item[1]
+				c_len = int(item[0])
+				if c_type == 'M':
+					ref_pos += c_len
+					read_pos += c_len
+					m_lens.append(c_len + m_lens[-1])
+					r_offs.append(r_offs[-1])
+				elif c_type == 'D':
+					for x in xrange(c_len):
+						change_pos.append(ref_pos + x)
+						change_seq.append('D')
+					ref_pos += c_len
+				elif c_type == 'I':
+					change_pos.append(ref_pos-1)
+					change_seq.append(seq[read_pos-1:read_pos + c_len])
+					read_pos += c_len
+					m_lens.append(c_len + m_lens[-1])
+					r_offs.append(c_len + r_offs[-1])					
+				elif c_type == 'S':
+					read_pos += c_len
+					r_offs.append(c_len + r_offs[-1])
+
+			mm_pos = pos
+			rmm_pos = 0
+			for item in parsed_mmstr:
+				if item in bases:
+					change_pos.append(mm_pos)
+					change_seq.append(seq[rmm_pos + r_offs[bisect(m_lens,rmm_pos)]])
+					mm_pos += 1
+					rmm_pos += 1
+				elif item[0] == '^':
+					mm_pos += len(item) - 1
+				else:
+					mm_pos += int(item) 
+					rmm_pos += int(item)
+		
+			print '\t'.join([
+					sid,
+					str(pos),
+					str(ref_pos - pos),
+					':'.join([str(v) for v in change_pos]),
+					':'.join(change_seq),
+					])
+	if opt.sam_file != 'stdin':
+		pf.close()
+	
+###################################################################### /MAIN ###
+################################################################################

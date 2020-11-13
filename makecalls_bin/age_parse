@@ -1,0 +1,186 @@
+#!/usr/bin/perl
+
+################################################################################
+### COPYRIGHT ##################################################################
+
+# Copyright (c) 2020, New York Genome Center
+# All rights reserved.
+# 
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#     * Redistributions of source code must retain the above copyright
+#       notice, this list of conditions and the following disclaimer.
+#     * Redistributions in binary form must reproduce the above copyright
+#       notice, this list of conditions and the following disclaimer in the
+#       documentation and/or other materials provided with the distribution.
+#     * Neither the name of the <organization> nor the
+#       names of its contributors may be used to endorse or promote products
+#       derived from this software without specific prior written permission.
+# 
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+# ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+# WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL <COPYRIGHT HOLDER> BE LIABLE FOR ANY
+# DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+# (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+# ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+# SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+################################################################# /COPYRIGHT ###
+################################################################################
+
+use strict;
+use POSIX;
+use Getopt::Long ;
+use List::Util qw( min max );
+
+my $infileStd;
+my $maxDistFromContigEnd = 15;
+my $maxDistFromSegmentEnd = 2000;
+my $minMatchLen = 15;
+my $minIdent = 92; 
+my $minIns = 10;  
+my $maxGap = 10000;
+my $usage = "$0 -i|--input <infile stdout>\n";
+
+GetOptions("inputStd|i=s" => \$infileStd,
+	   "minIdent|mi=i" => \$minIdent,
+	   "minMatch|mm=i" => \$minMatchLen,
+	   "maxGap|mg=i" => \$maxGap,
+	   "maxEndDist|me=i" => \$maxDistFromContigEnd,
+	   "maxEndDistSeg|ms=i" => \$maxDistFromSegmentEnd,
+	   "help|h" => sub {print "$usage\n" ; exit ;}
+	  );
+
+($infileStd ne "") or die "No input stdout file supplied, Usage:\n$usage\n" ;
+
+open(my $in,  $infileStd) or die "Could not open file '$infileStd' $!";
+
+my $contig = "NA";
+my $clen = 0;
+my $seglen = 0;
+my $count = 0;
+my $chr;
+my $score;
+my $left; my $identL; my $right; my $identR;
+my $ori; my$ori1;
+my $start1; my $end1; my $start; my $end;
+my $minPos; my $qPos1; my $qPos2; my $maxPos;			
+my $minPosT; my $tPos1; my $tPos2; my $maxPosT;
+my $offset = 0;
+my $line;
+
+while ($line=<>)
+{
+		if ($line =~ /^Match/m)
+		{ 
+			$count = $count + 1;
+		}
+		elsif ($line =~ /^First/m)
+		{
+			($seglen) = ($line=~/(\d+) nucs/m);	
+			chomp($seglen);
+			if ($line =~ /:/m)
+			{
+				($chr,$offset) = ($line =~ /nucs\s+\'(\S+):(\d+)\'/m);
+				chomp($offset);
+			}
+			else
+			{
+				($chr) = ($line =~ /nucs\s+\'(\S+)\'/m);
+			}
+			($start1,$end1) = ($line =~ /^First  seq\s*\[\s*(\d+),\s*(\d+)\s*\]/m);
+			chomp($start1); chomp($end1); 
+			$ori1 = "+";
+			($start1 < $end1) or ($ori1="-");
+		}
+		elsif ($line =~ /^Second/m)
+		{
+			($clen) = ($line=~/(\d+) nucs/m);	
+			chomp($clen);
+			($start,$end) = ($line =~ /^Second seq\s*\[\s*(\d+),\s*(\d+)/m);
+			if ($line =~ /:/m) 
+			{
+				($contig,$ori) = ($line =~ /nucs\s+\'(\S+):([+-])\'/m);
+			}
+			else	
+			{
+				($contig) = ($line =~ /nucs\s+\'(\S+)\'/m);
+				$ori = "+";
+				($start < $end) or ($ori="-");
+			}
+
+			chomp($contig);
+		}
+		elsif ($line =~ /^Score:/m)
+		{
+			($score) = ($line=~/Score:\s*(\d+)/m);
+		}
+	
+		elsif ($line =~ /^Alignment/m)
+		{
+			$line = <>;
+			($minPosT,$tPos1,$tPos2,$maxPosT) = ($line=~/\[\s*(\d+),\s*(\d+)\] EXCISED REGION \[\s*(\d+),\s*(\d+)\]/m);	
+			chomp($minPosT);
+			chomp($maxPosT);
+			$line = <>;
+			($minPos,$qPos1,$qPos2,$maxPos) = ($line=~/\[\s*(\d+),\s*(\d+)\] EXCISED REGION \[\s*(\d+),\s*(\d+)\]/m);				
+		}
+		elsif ($line =~ /^Identic/m)
+		{
+			($left,$identL,$right,$identR) = ($line=~/\=\>\s*(\d+)\s*\(\s*(\d+)\%\)\s*(\d+)\s*\(\s*(\d+)\%\)/m);
+		}
+		elsif ($line =~ /^EXCISED/m)
+		{
+			my $totalMapped = $qPos1-$minPos + $maxPos-$qPos2; 
+			my $leftMapped = $qPos1-$minPos + 1; 
+			my $rightMapped = $maxPos-$qPos2 + 1; 
+			my $distFromContigEndLeft = $minPos - 1;
+			my $distFromSegEndLeft = $minPosT - $start1;
+			my $distFromContigEndRight = $clen - $maxPos;
+			my $distFromSegEndRight = $end1 - $maxPosT; 	
+			my $isValidLeft = (($leftMapped >= $minMatchLen) && ($identL >= $minIdent) && ($distFromContigEndLeft <= $maxDistFromContigEnd) &&  ($distFromSegEndLeft <= $maxDistFromSegmentEnd) );
+			my $isValidRight = (($rightMapped >= $minMatchLen) && ($identR >= $minIdent) && ($distFromContigEndRight <= $maxDistFromContigEnd) && ($distFromSegEndRight <= $maxDistFromSegmentEnd ));
+			if ($isValidLeft && $isValidRight)
+			{
+				my $inslen = $qPos2 - ($qPos1 + 1);
+				my $dellen = $tPos2 - ($tPos1 + 1);
+				if (($inslen > $dellen) && ($dellen < $maxGap))
+				{		
+					my $qPos1Corrected = $qPos1;
+					my $qPos2Corrected = $qPos2-1;
+					if ($ori eq "-")
+					{	
+						my $temp = $qPos1Corrected;
+						$qPos1Corrected = $clen - $qPos2Corrected;
+						$qPos2Corrected = $clen - $temp;
+					}
+					print "$chr\t".($tPos1+$offset)."\t".($tPos2+$offset-1)."\t$contig\t$qPos1Corrected\t$qPos2Corrected\tinsertion\t$leftMapped:$identL:$distFromContigEndLeft:$distFromSegEndLeft:$rightMapped:$identR:$distFromContigEndRight:$distFromSegEndRight:$score:$dellen:$inslen\t+\t$ori\t$clen\n";		
+				}
+				else
+				{
+					print ".\t.\t.\t$contig\t.\t.\tdeltoolong\t.:.:.:.:.:.:.:.:.:.:.\t.\t.\t.\n";
+					exit;
+				}
+			}
+			else
+			{
+				print ".\t.\t.\t$contig\t.\t.\tinvalid\t.:.:.:.:.:.:.:.:.:.:.\t.\t.\t.\n";
+				exit;
+			}
+		}
+	}
+
+print ".\t.\t.\t$contig\t.\t.\tnone\t.:.:.:.:.:.:.:.:.:.:.\t.\t.\t.\n";
+
+sub trim($)
+{
+        my $string = shift;
+        $string =~ s/^\s+//;
+        $string =~ s/\s+$//;
+        return $string;
+}
+
+

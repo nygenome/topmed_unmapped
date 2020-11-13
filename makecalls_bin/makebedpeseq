@@ -1,0 +1,190 @@
+#!/usr/bin/python 
+
+################################################################################
+### COPYRIGHT ##################################################################
+
+# Copyright (c) 2020, New York Genome Center
+# All rights reserved.
+# 
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#     * Redistributions of source code must retain the above copyright
+#       notice, this list of conditions and the following disclaimer.
+#     * Redistributions in binary form must reproduce the above copyright
+#       notice, this list of conditions and the following disclaimer in the
+#       documentation and/or other materials provided with the distribution.
+#     * Neither the name of the <organization> nor the
+#       names of its contributors may be used to endorse or promote products
+#       derived from this software without specific prior written permission.
+# 
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+# ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+# WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL <COPYRIGHT HOLDER> BE LIABLE FOR ANY
+# DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+# (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+# ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+# SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+################################################################# /COPYRIGHT ###
+################################################################################
+
+
+
+################################################################################
+### MODULES ####################################################################
+
+import sys
+from optparse import OptionParser
+import re
+
+################################################################### /MODULES ###
+################################################################################
+
+
+
+
+################################################################################
+### FUNCTIONS ##################################################################
+
+def readfasta(filepath):
+	name = None
+	if filepath == 'stdin':
+		fasta = sys.stdin
+	else:
+		fasta = open(filepath, 'r')
+	for line in fasta:
+		if line[0] == '>':
+			if name:
+				yield(name,description,''.join(sequence))
+			header = line.rstrip()[1:].split(' ')
+			name = header[0]
+			description = ' '.join(header[1:])
+			sequence = []
+		else:
+			sequence.append(line.rstrip())
+	if filepath != 'stdin':
+		fasta.close()
+	if name:
+		yield(name, description, ''.join(sequence))
+		
+def readbedpe(filepath):
+	if filepath == 'stdin':
+		bedseq = sys.stdin
+	else:
+		bedseq = open(filepath, 'r')
+	for line in bedseq:
+		chromosome0, start0, end0, chromosome1, start1, end1, name, score, strand0, strand1 = line.rstrip().split('\t')[:10]
+		yield chromosome0, int(start0), int(end0), chromosome1, int(start1), int(end1), name, score, strand0, strand1			
+
+def revcomp(sequence,rcd):
+	return ''.join(rcd[c] for c in reversed(sequence))
+		
+################################################################# /FUNCTIONS ###
+################################################################################
+
+
+
+
+################################################################################
+### ARGUMENTS,OPTIONS ##########################################################
+
+parser = OptionParser(usage = "\n%prog [options]", version="%prog 0.1")
+
+parser.add_option(
+	"-b",
+	metavar = "FILE",
+	type = "string",
+	dest = "bedpe",
+	default = 'stdin',
+	help = "Input BEDPE filename (default = 'stdin')"
+	)
+
+parser.add_option(
+	"-q",
+	metavar = "FILE",
+	type = "string",
+	dest = "query",
+	default = None,
+	help = "Input query FASTA filename [MANDATORY]"
+	)
+
+parser.add_option(
+	"-t",
+	metavar = "FILE",
+	type = "string",
+	dest = "target",
+	default = None,
+	help = "Input target FASTA filename [MANDATORY]"
+	)
+
+parser.add_option(
+	"-s",
+	metavar = "INT",
+	type = "int",
+	dest = "slop",
+	default = 0,
+	help = "Target slop bp [0]"
+	)
+
+
+(opt, args) = parser.parse_args()
+
+######################################################### /ARGUMENTS,OPTIONS ###
+################################################################################
+
+
+
+
+################################################################################
+### CONSTANTS ##################################################################
+
+rcd={'a':'t','t':'a','A':'T','T':'A',
+	'g':'c','c':'g','G':'C','C':'G',
+	'r':'y','y':'r','R':'Y','Y':'R',
+	'k':'m','m':'k','K':'M','M':'K',
+	'b':'v','v':'b','B':'V','V':'B',
+	'd':'h','h':'d','D':'H','H':'D',
+	's':'s','w':'w','S':'S','W':'W',
+	'.':'.','-':'-','n':'n','N':'N'}
+
+################################################################# /CONSTANTS ###
+################################################################################
+
+
+
+
+################################################################################
+### MAIN #######################################################################
+			
+if __name__ == "__main__":
+
+
+	bedpe = readbedpe(opt.bedpe)
+	qfasta = readfasta(opt.query)
+	tfasta = readfasta(opt.target)
+
+	queries = {}
+	for name, description, sequence in qfasta:
+		queries[name] = sequence
+
+	targets = {}
+	for name, description, sequence in tfasta:
+		targets[name] = sequence
+
+
+	for chromosome0, start0, end0, chromosome1, start1, end1, name, score, strand0, strand1 in bedpe:
+		target = targets[chromosome0][max([start0-opt.slop, 0]):(end0+opt.slop)]
+		query = queries[chromosome1][max([start1-opt.slop, 0]):(end1+opt.slop)]
+		if strand1 == '-':
+			query = revcomp(query,rcd)
+				
+		print '\t'.join(str(v) for v in [chromosome0, max([start0-opt.slop, 0]), end0+opt.slop, chromosome1, max([start1-opt.slop, 0]), end1+opt.slop, name, score, strand0, strand1, target, query])
+	
+
+
+	
+###################################################################### /MAIN ###
+################################################################################
